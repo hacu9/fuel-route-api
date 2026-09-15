@@ -5,38 +5,77 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "base_url", "value": "http://127.0.0.1:8000", "type": "string" }
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    }
   ],
   "item": [
     {
       "name": "1. Health",
       "request": {
         "method": "GET",
-        "url": { "raw": "{{base_url}}/api/v1/health/", "host": ["{{base_url}}"], "path": ["api","v1","health",""] },
+        "url": {
+          "raw": "{{base_url}}/api/v1/health/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "health",
+            ""
+          ]
+        },
         "description": "Readiness, and how many stations carry coordinates."
       }
     },
     {
       "name": "2. Dallas to Chicago  (the main demo)",
-      "event": [{
-        "listen": "test",
-        "script": { "type": "text/javascript", "exec": [
-          "const b = pm.response.json();",
-          "pm.test('one external API call', () => pm.expect(b.meta.external_api_calls.total).to.be.at.most(1));",
-          "pm.test('every gallon of the journey is bought', () =>",
-          "  pm.expect(b.fuel_plan.total_gallons_purchased).to.be.above(b.route.distance_miles / 10));",
-          "pm.test('the split adds up', () =>",
-          "  pm.expect(b.fuel_plan.route_fuel.cost_usd + b.fuel_plan.detour_fuel.cost_usd)",
-          "    .to.be.closeTo(b.fuel_plan.total_cost_usd, 0.02));",
-          "console.log('stops', b.fuel_plan.stop_count, '| $' + b.fuel_plan.total_cost_usd,",
-          "            '| local', b.meta.timing_ms.local_computation, 'ms');"
-        ]}
-      }],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const b = pm.response.json();",
+              "pm.test('one external API call', () => pm.expect(b.meta.external_api_calls.total).to.be.at.most(1));",
+              "pm.test('every gallon of the journey is bought', () =>",
+              "  pm.expect(b.fuel_plan.total_gallons_purchased).to.be.above(b.route.distance_miles / 10));",
+              "pm.test('the split adds up', () =>",
+              "  pm.expect(b.fuel_plan.route_fuel.cost_usd + b.fuel_plan.detour_fuel.cost_usd)",
+              "    .to.be.closeTo(b.fuel_plan.total_cost_usd, 0.02));",
+              "console.log('stops', b.fuel_plan.stop_count, '| $' + b.fuel_plan.total_cost_usd,",
+              "            '| local', b.meta.timing_ms.local_computation, 'ms');"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\"\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
         "description": "961 miles, 3 stops. Check meta.external_api_calls and meta.timing_ms."
       }
     },
@@ -44,9 +83,28 @@
       "name": "3. Same route again  (cache: zero external calls)",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\"\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
         "description": "meta.external_api_calls.total is now 0 and the response lands in single digit milliseconds."
       }
     },
@@ -54,9 +112,28 @@
       "name": "4. Coast to coast  (Los Angeles to New York)",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"Los Angeles, CA\",\n  \"finish\": \"New York, NY\"\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Los Angeles, CA\",\n  \"finish\": \"New York, NY\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
         "description": "2811 miles, 15 stops. Still one external call."
       }
     },
@@ -64,9 +141,28 @@
       "name": "5. Leave with a full tank",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\",\n  \"start_fuel_gallons\": 50\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\",\n  \"start_fuel_gallons\": 50\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
         "description": "Prices only the top-ups, not the first 500 miles."
       }
     },
@@ -74,9 +170,28 @@
       "name": "6. Unconstrained optimum  (spacing 0)",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"Los Angeles, CA\",\n  \"finish\": \"New York, NY\",\n  \"min_stop_spacing_miles\": 0\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Los Angeles, CA\",\n  \"finish\": \"New York, NY\",\n  \"min_stop_spacing_miles\": 0\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
         "description": "More stops, a few cents cheaper. Shows the trade-off is deliberate and measured."
       }
     },
@@ -84,19 +199,57 @@
       "name": "7. ZIP codes and raw coordinates",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"75201\",\n  \"finish\": \"32.7767,-96.7970\"\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
-        "description": "Both resolve offline, so geocoding costs nothing."
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"75201\",\n  \"finish\": \"60601\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
+        "description": "A Dallas ZIP to a Chicago ZIP. Both resolve from the bundled gazetteer, so geocoding costs nothing and the request still makes exactly one external call."
       }
     },
     {
       "name": "8. Error: outside the USA",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"48.85,2.35\",\n  \"finish\": \"Dallas, TX\"\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"48.85,2.35\",\n  \"finish\": \"Dallas, TX\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
         "description": "422 outside_coverage. Paris is not in the United States."
       }
     },
@@ -104,9 +257,28 @@
       "name": "9. Error: no drivable route",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"start\": \"Honolulu, HI\",\n  \"finish\": \"Los Angeles, CA\"\n}" },
-        "url": { "raw": "{{base_url}}/api/v1/route/", "host": ["{{base_url}}"], "path": ["api","v1","route",""] },
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": \"Honolulu, HI\",\n  \"finish\": \"Los Angeles, CA\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/route/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route",
+            ""
+          ]
+        },
         "description": "422 no_route."
       }
     },
@@ -116,10 +288,24 @@
         "method": "GET",
         "url": {
           "raw": "{{base_url}}/api/v1/map/?start=Dallas, TX&finish=Chicago, IL",
-          "host": ["{{base_url}}"], "path": ["api","v1","map",""],
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "map",
+            ""
+          ],
           "query": [
-            { "key": "start", "value": "Dallas, TX" },
-            { "key": "finish", "value": "Chicago, IL" }
+            {
+              "key": "start",
+              "value": "Dallas, TX"
+            },
+            {
+              "key": "finish",
+              "value": "Chicago, IL"
+            }
           ]
         },
         "description": "The same plan drawn on Leaflet. Open this one in a browser, not in Postman."
