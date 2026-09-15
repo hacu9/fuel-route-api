@@ -58,10 +58,10 @@ class Route:
         cos_lat = max(np.cos(np.radians(self.mid_latitude)), 0.2)
         pad_lon = pad_miles / (69.0 * cos_lat)
         return (
-            float(self.lats.min()) - pad_lat,
-            float(self.lons.min()) - pad_lon,
-            float(self.lats.max()) + pad_lat,
-            float(self.lons.max()) + pad_lon,
+            float(self.lats.min() - pad_lat),
+            float(self.lons.min() - pad_lon),
+            float(self.lats.max() + pad_lat),
+            float(self.lons.max() + pad_lon),
         )
 
     def geojson(self) -> dict:
@@ -168,20 +168,41 @@ class OSRMClient:
             raise NoRouteError("The routing provider returned no route.", provider="osrm")
 
         best = routes[0]
-        encoded = best["geometry"]
-        points = polyline.decode(encoded, precision=_POLYLINE_PRECISION)
+        # A provider can answer "Ok" and still omit or mangle a field. Treat that
+        # as a provider fault, not as an unhandled server error.
+        try:
+            encoded = best["geometry"]
+            distance_meters = float(best["distance"])
+            duration_seconds = float(best["duration"])
+            points = polyline.decode(encoded, precision=_POLYLINE_PRECISION)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RoutingError(
+                "The routing provider returned a route it did not fill in.",
+                provider="osrm",
+            ) from exc
         if len(points) < 2:
             raise NoRouteError("The returned route has no usable geometry.")
 
         lats = np.fromiter((p[0] for p in points), dtype=float, count=len(points))
         lons = np.fromiter((p[1] for p in points), dtype=float, count=len(points))
 
+        total_miles = distance_meters / METERS_PER_MILE
+        # Integrating the polyline locally and the distance the provider reports
+        # differ by a few hundredths of a mile, because the polyline is a
+        # sampled path and the provider measures the road. The provider is
+        # authoritative, so rescale the integration to end exactly on it.
+        # Without this a station just short of the finish can land beyond
+        # total_miles and be discarded.
+        measured = cumulative_miles(lats, lons)
+        if measured[-1] > 0.0 and total_miles > 0.0:
+            measured *= total_miles / measured[-1]
+
         route = Route(
             lats=lats,
             lons=lons,
-            cumulative_miles=cumulative_miles(lats, lons),
-            total_miles=float(best["distance"]) / METERS_PER_MILE,
-            duration_hours=float(best["duration"]) / 3600.0,
+            cumulative_miles=measured,
+            total_miles=total_miles,
+            duration_hours=duration_seconds / 3600.0,
             encoded_polyline=encoded,
         )
         cache.set(cache_key, route, timeout=ROUTE_CACHE_SECONDS)

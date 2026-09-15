@@ -92,6 +92,27 @@ about the structure of an optimal solution — cross-checked 60 more.
 
 Neither would have been caught by reading the code.
 
+## The invariant suite
+
+A cost comparison cannot catch a plan that is cheap because it is impossible.
+`test_invariants.py` therefore replays each plan as a drive and asserts the
+physics: stops advance along the route, the tank never goes below empty at any
+stop or at the finish, it never exceeds 50 gallons, no leg exceeds the range,
+and the gallons and costs add up.
+
+**This found a third defect.** The departure fill-up is relocated to mile zero,
+but stations the vehicle had already passed stayed selectable, so a plan could
+put its second stop *behind* its first. The suite reported stop markers of
+`[34.5, 19.6, 53.9, ...]` -- a route that goes backwards.
+
+A fourth came from an independent review: a station 15 miles off the road costs
+30 miles of driving that the route geometry does not contain, so a 490 mile gap
+inside a 500 mile range really needs 520 and the tank runs 0.5 gallons short.
+See the detour section in [architecture.md](architecture.md).
+
+Every fix above is pinned by a test that was confirmed to fail when the fix is
+reverted. A test that stays green without the fix is not coverage.
+
 ## Where the result is deliberately not the pure optimum
 
 The unconstrained optimum will stop twice within a mile to save a fraction of a

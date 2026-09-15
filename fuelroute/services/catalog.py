@@ -16,7 +16,7 @@ import threading
 from dataclasses import dataclass
 
 import numpy as np
-from django.db.models import Max
+from django.db.models import Count, Max
 
 from fuelroute.models import FuelStation
 
@@ -60,14 +60,21 @@ class StationCatalog:
 
 
 def _fingerprint() -> tuple[int, str]:
-    stats = FuelStation.objects.filter(latitude__isnull=False).aggregate(
-        count=Max("id"), latest=Max("updated_at")
+    """Cheap signature of the located rows, checked once per request."""
+    stats = FuelStation.objects.filter(
+        latitude__isnull=False, longitude__isnull=False
+    ).aggregate(
+        located=Count("id"), latest=Max("updated_at")
     )
-    located = FuelStation.objects.filter(latitude__isnull=False).count()
-    return (located, str(stats["latest"]))
+    return (stats["located"] or 0, str(stats["latest"]))
 
 
 def _load() -> StationCatalog:
+    # Read the fingerprint first. If an import commits between this call and the
+    # row fetch, the fingerprint is older than the rows, so the next request
+    # sees a mismatch and reloads. Fingerprinting afterwards would stamp stale
+    # rows as current and serve them until the table changed again.
+    fingerprint = _fingerprint()
     rows = list(
         FuelStation.objects.filter(latitude__isnull=False, longitude__isnull=False)
         .values_list(
@@ -87,7 +94,7 @@ def _load() -> StationCatalog:
         cities=[r[6] for r in rows],
         states=[r[7] for r in rows],
         opis_ids=[r[8] for r in rows],
-        fingerprint=_fingerprint(),
+        fingerprint=fingerprint,
     )
 
 

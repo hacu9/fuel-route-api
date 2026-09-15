@@ -176,7 +176,9 @@ class Command(BaseCommand):
             )
 
         catalog.invalidate()
-        located = FuelStation.objects.filter(latitude__isnull=False).count()
+        located = FuelStation.objects.filter(
+            latitude__isnull=False, longitude__isnull=False
+        ).count()
         total = FuelStation.objects.count()
         self.stdout.write(
             self.style.SUCCESS(

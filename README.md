@@ -24,6 +24,8 @@ A browser-friendly map of the same plan is served at `/api/v1/map/`.
 
 ## Quick start
 
+Python 3.12 or newer is required, because Django 6.1 requires it.
+
 ```bash
 # 1. Install. uv reads pyproject.toml and builds the virtualenv.
 uv sync
@@ -52,9 +54,29 @@ curl -X POST http://127.0.0.1:8000/api/v1/route/ \
 Open <http://127.0.0.1:8000/api/v1/map/?start=Dallas,+TX&finish=Chicago,+IL>
 for the map.
 
+### Without uv
+
+```bash
+python3.13 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+python manage.py migrate
+python manage.py import_fuel_prices data/sample-fuel-prices.csv
+python manage.py geocode_stations
+python manage.py runserver
+```
+
+Drop the `uv run` prefix from every command below if you install this way.
+
+### The price file
+
 If you do not have the assessment CSV to hand, `data/sample-fuel-prices.csv`
 holds 8000 synthetic stations with the same columns. It is there so the project
 runs out of the box. Replace it with the real file.
+
+The importer matches the header row by keyword rather than by exact spelling,
+so a renamed or reordered column still loads. It prints the mapping it chose
+before it writes anything.
 
 ---
 
@@ -106,7 +128,8 @@ The last three fields are optional. Their defaults come from `.env`.
     "max_range_miles": 500.0,
     "miles_per_gallon": 10.0,
     "tank_capacity_gallons": 50.0,
-    "start_fuel_gallons": 0.0
+    "start_fuel_gallons": 0.0,
+    "usable_range_miles": 470.0
   },
   "fuel_plan": {
     "stops": [
@@ -117,16 +140,20 @@ The last three fields are optional. Their defaults come from `.env`.
         "price_per_gallon": 2.731,
         "route_mile_marker": 29.4,
         "detour_miles": 5.03,
-        "gallons_purchased": 19.274,
-        "cost_usd": 52.64,
+        "gallons_purchased": 20.28,     // route fuel plus the detour
+        "gallons_for_route": 19.274,
+        "gallons_for_detour": 1.006,
+        "cost_usd": 55.39,
         "is_origin_fill": true
       }
     ],
     "stop_count": 3,
-    "total_gallons_purchased": 96.102,
-    "total_cost_usd": 246.43,
-    "average_price_per_gallon": 2.564,
-    "fuel_consumed_gallons": 96.1
+    "total_gallons_purchased": 98.0,
+    "total_cost_usd": 251.41,
+    "average_price_per_gallon": 2.565,
+    "fuel_consumed_gallons": 98.0,
+    "route_fuel":  { "gallons": 96.102, "cost_usd": 246.43 },
+    "detour_fuel": { "miles_driven": 19.1, "gallons": 1.91, "cost_usd": 4.98 }
   },
   "meta": {
     "external_api_calls": { "routing": 1, "geocoding": 0, "total": 1 },
@@ -222,29 +249,76 @@ These are choices the brief left open. Each one is visible in the response.
    station near the origin, prices it as mile zero, and flags it with
    `is_origin_fill`. The gallons still cover the entire route, so
    `total_gallons_purchased` always equals `distance / 10`.
-3. **A station counts if it is within 15 miles of the route.** Configurable
-   through `max_detour_miles`. The detour distance itself is not added to the
-   trip.
+3. **A station counts if it is within 15 miles of the route, and the drive to
+   it is paid for.** Leaving the road and rejoining it burns fuel that the route
+   geometry does not contain, so that fuel is billed at the pump that caused it
+   and reported separately as `detour_fuel`. It is 2 to 7 percent of a typical
+   total.
+
+   It also constrains range. Planning legs against the full 500 miles would let
+   the optimizer accept a 490 mile gap that really needs 520, and the tank would
+   run dry. The planner therefore reserves the worst-case detour at both ends of
+   every leg and plans against `usable_range_miles`, which is 470 by default.
 4. **Stops are at least 10 miles apart.** Without this the optimum will pull off
    the road twice in one mile to save a fraction of a cent. Pass
    `"min_stop_spacing_miles": 0` for the unconstrained optimum.
+
+   This means the default result is not always the mathematical optimum. The
+   worst case I could construct costs 0.90 percent more: stations at miles 0, 490,
+   500 and 509 priced $4.00, $6.00, $3.00 and $2.00 over a 1000 mile route give
+   $300.90 unconstrained and $303.60 at the default spacing.
+
+   On real routes the penalty is far smaller. On Los Angeles to New York,
+   2811 miles:
+
+   | `min_stop_spacing_miles` | Candidates | Stops | Total cost | Smallest purchase |
+   |--------------------------|-----------:|------:|-----------:|------------------:|
+   | 0 (pure optimum)         |       1189 |    16 |    $816.62 |          0.52 gal |
+   | 10 (default)             |        132 |    15 |    $816.69 |          1.54 gal |
+   | 25                       |         63 |    14 |    $816.78 |          3.64 gal |
+   | 150                      |         13 |    10 |    $818.86 |          8.20 gal |
+
+   The default costs 7 cents on an $817 trip, which is 0.009 percent. Ten stops
+   instead of sixteen costs $2.24, which is 0.27 percent.
 5. **Prices are a snapshot.** The file has no dates, so every price is treated
    as current.
+
+---
+
+## Known limitations
+
+* **The caches are per process.** Two concurrent requests for the same uncached
+  route can both call the provider. Each request still makes one call, so the
+  requirement holds, but the cache does not deduplicate under load. A shared
+  Redis cache with a lock would fix both that and the same race in the geocoder.
+* **Stations are placed at their city centre**, because the price file has no
+  coordinates. That is accurate enough to choose stops against a 500 mile range,
+  but it is not accurate enough to navigate to the pump.
+* **Prices have no date.** The file carries none, so every price is treated as
+  current.
 
 ---
 
 ## Testing
 
 ```bash
-uv run pytest          # 102 tests
+uv run pytest          # 170 tests
 uv run ruff check .
 ```
 
 The suite never touches the network: the routing provider and the geocoder are
 both mocked, so it is deterministic and runs in under a second.
 
-It includes a randomised optimality check that compares the optimizer against an
-independent exhaustive search. See [docs/algorithm.md](docs/algorithm.md).
+Two suites carry most of the weight:
+
+* `test_optimizer.py` compares the optimizer against an independent exhaustive
+  search on random instances.
+* `test_invariants.py` checks that a plan is physically possible: stops advance
+  along the route, the tank never goes below empty or above 50 gallons, and the
+  gallons and costs add up. This catches a class of bug a cost comparison
+  cannot, namely a plan that is cheap because it is impossible.
+
+Both found real defects. See [docs/algorithm.md](docs/algorithm.md).
 
 ---
 

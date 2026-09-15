@@ -45,7 +45,11 @@ def plan_route(request):
 def health(request):
     """Readiness probe that also reports how much of the catalogue is usable."""
     total = FuelStation.objects.count()
-    located = FuelStation.objects.filter(latitude__isnull=False).count()
+    # Both coordinates, because that is what the route matcher requires. A row
+    # with only one would otherwise be reported ready and then be unusable.
+    located = FuelStation.objects.filter(
+        latitude__isnull=False, longitude__isnull=False
+    ).count()
     ready = located > 0
     return Response(
         {

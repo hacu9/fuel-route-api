@@ -99,7 +99,9 @@ class Command(BaseCommand):
 
         catalog.invalidate()
         total = FuelStation.objects.count()
-        located = FuelStation.objects.filter(latitude__isnull=False).count()
+        located = FuelStation.objects.filter(
+            latitude__isnull=False, longitude__isnull=False
+        ).count()
         percent = (located / total * 100.0) if total else 0.0
         self.stdout.write(
             self.style.SUCCESS(f"{located} of {total} stations located ({percent:.1f}%).")

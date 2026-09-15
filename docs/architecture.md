@@ -69,14 +69,22 @@ automatically. There is no restart and no manual cache flush.
 
 1. **Bounding box.** One vectorised comparison drops every station outside the
    route's box padded by the detour radius. 8000 becomes a few hundred.
-2. **Resample.** The polyline is thinned to one vertex every 250 m, which bounds
-   the work on a route with dense urban geometry.
-3. **k-d tree.** Each surviving station finds its nearest route vertex. That
-   vertex's cumulative distance becomes the station's position along the route.
+2. **Densify.** The polyline is resampled by interpolation at a fixed 250 m arc
+   length, so the sample spacing is uniform.
+3. **k-d tree.** Each surviving station finds its nearest sample point. That
+   point's distance along the route becomes the station's position.
 
-Step 3 measures to the nearest *vertex*, not the nearest point on a *segment*.
-At 250 m spacing the largest possible error is 125 m, against a detour radius
-measured in miles.
+Step 2 densifies rather than thins, and that distinction is the whole point. The
+provider emits a vertex only where the road changes direction, so a straight
+interstate stretch can run **7 km** between consecutive vertices. Selecting
+existing vertices left a worst-case position error of **2.2 miles**, not the
+125 m I first assumed and wrote down. Measuring it disproved the claim.
+
+Interpolating along each segment makes the spacing uniform, so the error is
+genuinely bounded at half a stride. The measured effect on real routes is modest
+-- mile markers move by up to 1.2 miles and reported detours shrink by up to
+0.15 miles -- and no station that matched before stops matching. It is an
+accuracy fix, not a behaviour change.
 
 The cumulative distances are integrated locally with the haversine formula. On
 Dallas to Chicago that sum reproduces the road distance OSRM reports —
@@ -115,6 +123,21 @@ to the cheapest row.
 
 **`GeocodeCache`** — resolved coordinates for a free-text place, so an unusual
 place name costs one network call ever rather than one per request.
+
+## Accounting for the detour
+
+A station 15 miles off the road costs 30 miles of driving that the route
+geometry does not contain. Ignoring that is not a rounding error:
+
+* **It breaks feasibility.** Stations at miles 0, 490 and 990, each 15 miles off
+  the road, look like a 490 mile gap inside a 500 mile range. The real drive is
+  520 miles and the tank runs 0.5 gallons short. The planner therefore reserves
+  the worst-case detour at both ends of every leg and plans against
+  `usable_range_miles`, 470 by default.
+* **It understates the bill.** The detour fuel is 2 to 7 percent of a real
+  total. It is billed at the pump that caused it, because that is where the
+  driver buys it, and reported separately as `detour_fuel` so the split stays
+  visible.
 
 ## What I would change with more time
 

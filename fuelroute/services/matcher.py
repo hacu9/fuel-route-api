@@ -14,13 +14,22 @@ Method:
    the detour radius the station is usable, and that vertex's cumulative
    distance becomes the station's position along the route.
 
-Step 3 measures to the nearest polyline *vertex* rather than the nearest point
-on a segment. With the default 250 m resampling the largest possible error is
-125 m, which is immaterial against a detour radius measured in miles.
+Step 3 measures to the nearest sample point rather than to the nearest point on
+a segment, so the sample spacing bounds the error at half a stride -- 125 m at
+the default 250 m.
+
+That bound only holds because the polyline is *densified*, not thinned. The
+routing provider emits a vertex only where the road changes direction, so a
+straight interstate stretch can run 7 km between consecutive vertices. Picking
+existing vertices would have left a worst-case error of 2.2 miles, wide enough
+to push a station across the detour boundary. Interpolating along each segment
+at a fixed arc length removes that: no two samples are ever more than one
+stride apart, whatever the road does.
 """
 
 from __future__ import annotations
 
+import bisect
 import logging
 from dataclasses import dataclass
 
@@ -42,20 +51,33 @@ class MatchedStation:
     price_per_gallon: float
 
 
-def _resample(route: Route, stride_meters: float) -> np.ndarray:
-    """Indices of route vertices spaced at least ``stride_meters`` apart.
+def _sample_route(
+    route: Route, stride_meters: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Points along the route at a fixed arc length, with their mile markers.
 
-    The first and last vertices are always kept, so the route keeps its exact
-    endpoints.
+    Returns ``(latitudes, longitudes, miles_from_origin)``. Samples are
+    interpolated along the polyline rather than selected from it, so the spacing
+    is uniform however far apart the provider's vertices happen to be. The
+    marker array is the interpolation parameter itself, so a station's position
+    along the route needs no further lookup.
     """
+    cumulative = route.cumulative_miles
+    total = float(cumulative[-1])
     stride_miles = stride_meters / METERS_PER_MILE
-    if stride_miles <= 0 or route.cumulative_miles[-1] <= stride_miles:
-        return np.arange(route.lats.size)
 
-    marks = np.arange(0.0, route.cumulative_miles[-1], stride_miles)
-    picked = np.searchsorted(route.cumulative_miles, marks, side="left")
-    picked = np.append(picked, route.lats.size - 1)
-    return np.unique(np.clip(picked, 0, route.lats.size - 1))
+    if stride_miles <= 0 or total <= 0:
+        return route.lats, route.lons, cumulative
+
+    marks = np.arange(0.0, total, stride_miles)
+    if marks.size == 0 or marks[-1] < total:
+        marks = np.append(marks, total)
+
+    return (
+        np.interp(marks, cumulative, route.lats),
+        np.interp(marks, cumulative, route.lons),
+        marks,
+    )
 
 
 def match_stations(
@@ -79,12 +101,10 @@ def match_stations(
     if candidate_indices.size == 0:
         return []
 
-    sample = _resample(route, stride_meters)
+    sample_lats, sample_lons, sample_miles = _sample_route(route, stride_meters)
     reference_latitude = route.mid_latitude
 
-    route_x, route_y = project_to_miles(
-        route.lats[sample], route.lons[sample], reference_latitude
-    )
+    route_x, route_y = project_to_miles(sample_lats, sample_lons, reference_latitude)
     station_x, station_y = project_to_miles(
         catalog.latitudes[candidate_indices],
         catalog.longitudes[candidate_indices],
@@ -103,7 +123,7 @@ def match_stations(
     if not hit.any():
         return []
 
-    positions = route.cumulative_miles[sample][vertices[hit]]
+    positions = sample_miles[vertices[hit]]
     matched_indices = candidate_indices[hit]
     detours = distances[hit]
     prices = catalog.prices[matched_indices]
@@ -146,8 +166,6 @@ def prune_dominated(
     """
     if min_spacing_miles <= 0 or len(stations) < 2:
         return stations
-
-    import bisect
 
     accepted_positions: list[float] = []
     kept: list[MatchedStation] = []

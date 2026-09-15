@@ -78,6 +78,19 @@ def plan(
     mpg = vehicle["miles_per_gallon"]
     tank_gallons = range_miles / mpg
 
+    # A station 15 miles off the road costs 30 miles of driving that the route
+    # geometry does not contain. Planning legs against the full 500 miles lets
+    # the optimizer accept a 490 mile gap that really needs 520, and the tank
+    # runs dry. Reserve the worst-case detour at both ends of every leg.
+    detour_reserve = 2.0 * vehicle["max_detour_miles"]
+    usable_range_miles = max(range_miles - detour_reserve, 0.0)
+    if usable_range_miles <= 0.0:
+        raise InfeasibleRouteError(
+            "The detour allowance is larger than the vehicle range.",
+            vehicle_range_miles=range_miles,
+            max_detour_miles=vehicle["max_detour_miles"],
+        )
+
     client = OSRMClient()
     routing_started = time.perf_counter()
     route = client.route(
@@ -117,7 +130,7 @@ def plan(
         fuel_plan = plan_fuel_stops(
             candidates=candidates,
             total_miles=route.total_miles,
-            range_miles=range_miles,
+            range_miles=usable_range_miles,
             miles_per_gallon=mpg,
             start_fuel_gallons=initial_gallons,
         )
@@ -134,22 +147,38 @@ def plan(
         fuel_plan = plan_fuel_stops(
             candidates=candidates,
             total_miles=route.total_miles,
-            range_miles=range_miles,
+            range_miles=usable_range_miles,
             miles_per_gallon=mpg,
             start_fuel_gallons=initial_gallons,
         )
         spacing_applied = 0.0
 
     stops = []
+    detour_miles_total = 0.0
+    detour_gallons_total = 0.0
+    detour_cost_total = 0.0
     for purchase in fuel_plan.purchases:
         matched_station = purchase.candidate.payload
         record = catalog.record(matched_station.catalog_index)
+
+        # Leaving the road and rejoining it burns fuel, and the driver buys that
+        # fuel at this pump. Billing it here keeps the totals equal to what the
+        # journey really consumes.
+        detour_round_trip = 2.0 * matched_station.detour_miles
+        detour_gallons = detour_round_trip / mpg
+        detour_cost = detour_gallons * purchase.candidate.price_per_gallon
+        detour_miles_total += detour_round_trip
+        detour_gallons_total += detour_gallons
+        detour_cost_total += detour_cost
+
         record.update(
             {
                 "route_mile_marker": round(matched_station.position_miles, 1),
                 "detour_miles": round(matched_station.detour_miles, 2),
-                "gallons_purchased": round(purchase.gallons, 3),
-                "cost_usd": round(purchase.cost, 2),
+                "gallons_purchased": round(purchase.gallons + detour_gallons, 3),
+                "gallons_for_route": round(purchase.gallons, 3),
+                "gallons_for_detour": round(detour_gallons, 3),
+                "cost_usd": round(purchase.cost + detour_cost, 2),
                 "tank_gallons_on_arrival": round(purchase.arrival_fuel_gallons, 2),
                 "tank_gallons_on_departure": round(purchase.departure_fuel_gallons, 2),
                 "is_origin_fill": matched_station.catalog_index == origin_fill_index
@@ -180,18 +209,36 @@ def plan(
             "miles_per_gallon": mpg,
             "tank_capacity_gallons": round(tank_gallons, 2),
             "start_fuel_gallons": round(initial_gallons, 2),
+            # Legs are planned against this, not the full range, so that the
+            # drive off the route and back always fits.
+            "usable_range_miles": round(usable_range_miles, 1),
         },
         "fuel_plan": {
             "stops": stops,
             "stop_count": len(stops),
-            "total_gallons_purchased": round(fuel_plan.total_gallons, 3),
-            "total_cost_usd": round(fuel_plan.total_cost, 2),
+            "total_gallons_purchased": round(
+                fuel_plan.total_gallons + detour_gallons_total, 3
+            ),
+            "total_cost_usd": round(fuel_plan.total_cost + detour_cost_total, 2),
             "average_price_per_gallon": (
-                round(fuel_plan.total_cost / fuel_plan.total_gallons, 3)
-                if fuel_plan.total_gallons > 0
+                round(
+                    (fuel_plan.total_cost + detour_cost_total)
+                    / (fuel_plan.total_gallons + detour_gallons_total),
+                    3,
+                )
+                if fuel_plan.total_gallons + detour_gallons_total > 0
                 else None
             ),
-            "fuel_consumed_gallons": round(consumed_gallons, 2),
+            "fuel_consumed_gallons": round(consumed_gallons + detour_gallons_total, 2),
+            "route_fuel": {
+                "gallons": round(fuel_plan.total_gallons, 3),
+                "cost_usd": round(fuel_plan.total_cost, 2),
+            },
+            "detour_fuel": {
+                "miles_driven": round(detour_miles_total, 2),
+                "gallons": round(detour_gallons_total, 3),
+                "cost_usd": round(detour_cost_total, 2),
+            },
         },
         "meta": {
             "external_api_calls": {
@@ -250,13 +297,24 @@ def _build_candidates(matched, route: Route, initial_gallons: float, detour_mile
         fallback = settings.FUEL_ROUTE["ORIGIN_FALLBACK_RADIUS_MILES"]
         near_origin = [c for c in candidates if c.position_miles <= fallback]
     if not near_origin:
+        nearest = min(c.position_miles for c in candidates)
+        mpg = settings.FUEL_ROUTE["MILES_PER_GALLON"]
         raise InfeasibleRouteError(
             "No fuel station sits near the start of this route, so the vehicle "
-            "cannot set off with an empty tank.",
-            nearest_station_mile=round(min(c.position_miles for c in candidates), 1),
+            f"cannot set off with an empty tank. The first station is {nearest:.0f} "
+            f"miles along. Send start_fuel_gallons of at least "
+            f"{nearest / mpg:.1f} to plan this route.",
+            nearest_station_mile=round(nearest, 1),
+            start_fuel_gallons_required=round(nearest / mpg, 1),
+            feasible_with_full_tank=nearest <= settings.FUEL_ROUTE["MAX_RANGE_MILES"],
         )
 
     chosen = min(near_origin, key=lambda c: (c.price_per_gallon, c.position_miles))
+
+    # The vehicle drives to this station before it really sets off, so every
+    # station it has already passed is gone. Keeping them would let the planner
+    # pick a stop behind the departure fill-up, which reads as driving backwards
+    # and puts the stops out of route order.
+    ahead = [c for c in candidates if c.position_miles > chosen.position_miles]
     relocated = Candidate(0.0, chosen.price_per_gallon, chosen.payload)
-    candidates = [relocated] + [c for c in candidates if c is not chosen]
-    return candidates, chosen.payload.catalog_index
+    return [relocated] + ahead, chosen.payload.catalog_index
