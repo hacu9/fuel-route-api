@@ -70,9 +70,47 @@ if (plan) {
     </ol>`;
 
   const map = L.map('map');
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
-  }).addTo(map);
+
+  // Tile providers, tried in order. OpenStreetMap's own servers are volunteer
+  // run and their usage policy requires an app to identify itself; a page on
+  // localhost cannot, so they answer 403 "Access blocked" and the map fills
+  // with warning tiles. CARTO and Esri are CDNs meant for this, need no API
+  // key, and keep the OpenStreetMap attribution their data requires.
+  // Tile providers, tried in order. Two traps here, both found by looking at
+  // the rendered map rather than at the HTTP status:
+  //   - OpenStreetMap's own servers are volunteer run and their usage policy
+  //     requires an app to identify itself. A page on localhost cannot, so they
+  //     answer 403 and the map fills with "Access blocked" tiles.
+  //   - CARTO answers 200 and then watermarks every tile "API KEY REQUIRED".
+  // Esri's basemap is open for this use and needs no key.
+  const PROVIDERS = [
+    { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+      opts: { maxZoom: 19, attribution: 'Tiles &copy; Esri &mdash; source: Esri, HERE, Garmin, OpenStreetMap contributors' } },
+    { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+      opts: { maxZoom: 19, attribution: 'Tiles &copy; Esri' } },
+    { url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
+      opts: { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' } },
+  ];
+
+
+  let providerIndex = 0;
+  let tiles = null;
+
+  function useProvider(index) {
+    if (index >= PROVIDERS.length) return;   // out of options; keep the last
+    if (tiles) map.removeLayer(tiles);
+    providerIndex = index;
+    const p = PROVIDERS[index];
+    let failures = 0;
+    tiles = L.tileLayer(p.url, p.opts);
+    // A handful of failures means this provider is refusing us, not that one
+    // tile is missing. Move on rather than paint the map with error tiles.
+    tiles.on('tileerror', () => {
+      if (++failures === 4 && providerIndex === index) useProvider(index + 1);
+    });
+    tiles.addTo(map);
+  }
+  useProvider(0);
 
   const line = L.geoJSON(rt.geojson, { style: { color: '#1b62c4', weight: 4, opacity: .85 } }).addTo(map);
   map.fitBounds(line.getBounds(), { padding: [30, 30] });

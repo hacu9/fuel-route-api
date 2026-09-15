@@ -309,6 +309,12 @@ These are choices the brief left open. Each one is visible in the response.
   imported but never matched to a route.
 * **Prices have no date.** The file carries none, so every price is treated as
   current.
+* **The map uses Esri's basemap, not OpenStreetMap's own tile servers.** Those
+  are volunteer run, and their usage policy requires an app to identify itself.
+  A page served from localhost cannot, so they answer 403 and the map fills with
+  "Access blocked" tiles. CARTO is worse in a quieter way: it answers 200 and
+  then watermarks every tile "API KEY REQUIRED". The page falls back through
+  three providers if one starts refusing.
 
 ---
 

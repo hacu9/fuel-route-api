@@ -128,6 +128,25 @@ docker run -p 5000:5000 osrm/osrm-backend osrm-routed /data/us-latest.osrm
 
 Nothing else changes.
 
+### Basemap tiles
+
+The map page went through three providers before one worked, and the reason is
+worth recording because the failure was invisible to a status check.
+
+* **OpenStreetMap's own tile servers** answer **403**. They are volunteer run and
+  their usage policy requires an app to identify itself; a page served from
+  localhost cannot, so every tile comes back as an "Access blocked" warning
+  image and the map is unusable.
+* **CARTO** answers **200** and serves a real PNG -- and watermarks it
+  "API KEY REQUIRED" across the whole tile. A `curl -w %{http_code}` check
+  passes cleanly and the map is still ruined.
+* **Esri's World Street Map** serves clean tiles with no key.
+
+The lesson is that testing a tile provider by its HTTP status is not a test. The
+only check that works is rendering the page and looking at it. The page now
+tries the providers in order and moves to the next after a few tile errors, so a
+provider that starts refusing mid-demo degrades instead of breaking.
+
 ### Error handling
 
 Every failure the planner understands is a subclass of `PlannerError` carrying
