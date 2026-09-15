@@ -1,0 +1,267 @@
+# Fuel Route API
+
+An API that plans a drive between two US locations, picks the cheapest places to
+buy fuel along the way, and returns the total fuel bill.
+
+Built with Django 6.1 and Django REST Framework.
+
+![Dallas to Chicago, three fuel stops](docs/images/route-map.png)
+
+---
+
+## What it does
+
+Give it a start and a finish. It returns:
+
+* the driving route, as an encoded polyline and as GeoJSON;
+* the cheapest set of fuel stops for a vehicle with a 500 mile range;
+* the gallons bought at each stop and the price paid;
+* the total money spent on fuel at 10 miles per gallon.
+
+A browser-friendly map of the same plan is served at `/api/v1/map/`.
+
+---
+
+## Quick start
+
+```bash
+# 1. Install. uv reads pyproject.toml and builds the virtualenv.
+uv sync
+
+# 2. Create the database.
+uv run python manage.py migrate
+
+# 3. Load the fuel prices. Point this at the assessment CSV.
+uv run python manage.py import_fuel_prices data/fuel-prices-for-be-assessment.csv
+
+# 4. Give every station a latitude and a longitude. No network calls.
+uv run python manage.py geocode_stations
+
+# 5. Run it.
+uv run python manage.py runserver
+```
+
+Then:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/route/ \
+  -H 'Content-Type: application/json' \
+  -d '{"start": "Dallas, TX", "finish": "Chicago, IL"}'
+```
+
+Open <http://127.0.0.1:8000/api/v1/map/?start=Dallas,+TX&finish=Chicago,+IL>
+for the map.
+
+If you do not have the assessment CSV to hand, `data/sample-fuel-prices.csv`
+holds 8000 synthetic stations with the same columns. It is there so the project
+runs out of the box. Replace it with the real file.
+
+---
+
+## Endpoints
+
+| Method     | Path             | Purpose                                  |
+|------------|------------------|------------------------------------------|
+| POST / GET | `/api/v1/route/` | Plan a route and price its fuel stops.   |
+| GET        | `/api/v1/map/`   | The same plan drawn on a Leaflet map.    |
+| GET        | `/api/v1/health/`| Readiness, and how much data is loaded.  |
+| GET        | `/api/v1/catalog/`| Price range and states in the catalogue.|
+
+### Request
+
+```json
+{
+  "start": "Dallas, TX",
+  "finish": "Chicago, IL",
+  "start_fuel_gallons": 0,
+  "max_detour_miles": 15,
+  "min_stop_spacing_miles": 10
+}
+```
+
+`start` and `finish` accept four forms. The first three cost no external call:
+
+| Form              | Example              | Resolved by            |
+|-------------------|----------------------|------------------------|
+| City and state    | `Dallas, TX`         | Offline gazetteer      |
+| ZIP code          | `75201`              | Offline gazetteer      |
+| Coordinates       | `32.7767,-96.7970`   | Used directly          |
+| Any other text    | `The Alamo`          | Nominatim, then cached |
+
+The last three fields are optional. Their defaults come from `.env`.
+
+### Response
+
+```jsonc
+{
+  "start":  { "query": "Dallas, TX", "latitude": 32.793333, "resolved_by": "gazetteer" },
+  "finish": { "query": "Chicago, IL", "latitude": 41.837551, "resolved_by": "gazetteer" },
+  "route": {
+    "distance_miles": 961.02,
+    "duration_hours": 17.04,
+    "geometry_polyline6": "...",
+    "bounds": [32.55, -97.07, 42.09, -87.35]
+  },
+  "vehicle": {
+    "max_range_miles": 500.0,
+    "miles_per_gallon": 10.0,
+    "tank_capacity_gallons": 50.0,
+    "start_fuel_gallons": 0.0
+  },
+  "fuel_plan": {
+    "stops": [
+      {
+        "name": "Kwik Trip #4136",
+        "city": "Nevada", "state": "TX",
+        "latitude": 33.035329, "longitude": -96.370639,
+        "price_per_gallon": 2.731,
+        "route_mile_marker": 29.4,
+        "detour_miles": 5.03,
+        "gallons_purchased": 19.274,
+        "cost_usd": 52.64,
+        "is_origin_fill": true
+      }
+    ],
+    "stop_count": 3,
+    "total_gallons_purchased": 96.102,
+    "total_cost_usd": 246.43,
+    "average_price_per_gallon": 2.564,
+    "fuel_consumed_gallons": 96.1
+  },
+  "meta": {
+    "external_api_calls": { "routing": 1, "geocoding": 0, "total": 1 },
+    "stations_near_route": 318,
+    "stations_considered": 55,
+    "timing_ms": { "routing_provider": 711.1, "local_computation": 6.7, "total": 717.8 }
+  }
+}
+```
+
+Every response carries `meta.external_api_calls`, so the call count is not a
+claim in a README. You can read it off each request.
+
+### Errors
+
+Every failure returns the same envelope and a status code that says whose
+problem it is.
+
+```json
+{ "error": { "code": "infeasible_route", "message": "...", "details": {} } }
+```
+
+| Code                | Status | Meaning                                       |
+|---------------------|--------|-----------------------------------------------|
+| `invalid_request`   | 400    | The body failed validation.                   |
+| `geocoding_failed`  | 422    | A location string did not resolve.            |
+| `outside_coverage`  | 422    | A point sits outside the United States.       |
+| `no_route`          | 422    | No road connects the two points.              |
+| `infeasible_route`  | 422    | A gap between stations exceeds 500 miles.     |
+| `routing_failed`    | 502    | The routing provider failed.                  |
+| `catalog_empty`     | 503    | No stations are loaded.                       |
+
+---
+
+## How the requirements are met
+
+### "One call to the map/route API is ideal"
+
+**An ordinary request makes exactly one.**
+
+The routing provider is called once. Its response carries the full road
+geometry, and every later decision is computed locally from that one payload.
+No second call is ever made to place a stop.
+
+Geocoding is what usually forces extra calls, so it is avoided rather than
+optimised:
+
+* A city and state, a ZIP, or a coordinate pair resolves against a Census
+  gazetteer that ships in this repository. No network.
+* Any other text hits Nominatim once, and the result is stored in
+  `GeocodeCache`. The second request for that place is free.
+
+A repeated route is served from the route cache, so it makes **zero** calls.
+
+### "The API should return results quickly"
+
+Local computation is **5 to 70 ms** for routes between 900 and 3300 miles. The
+rest of the wall time is the OSRM demo server, which `meta.timing_ms` reports
+separately so the two are never confused.
+
+| Route                | Local compute | Provider | Warm (cached) |
+|----------------------|---------------|----------|---------------|
+| Dallas to Chicago    | 6.7 ms        | 711 ms   | 3 ms          |
+| Los Angeles to NY    | 7.0 ms        | 1391 ms  | 7 ms          |
+| Seattle to Miami     | 8.1 ms        | 1077 ms  | 8 ms          |
+
+What makes the local part fast:
+
+* the 8000 station catalogue lives in memory as numpy arrays, so a request
+  never queries the database for prices;
+* a bounding box test discards almost the whole country in one vectorised pass;
+* a k-d tree places the survivors on the route;
+* the optimizer is O(n log n).
+
+### "Optimal ... cost effective based on fuel prices"
+
+See [docs/algorithm.md](docs/algorithm.md). The short version: the optimum
+follows two rules, and the implementation is checked against an exhaustive
+search on hundreds of random instances.
+
+---
+
+## Assumptions
+
+These are choices the brief left open. Each one is visible in the response.
+
+1. **The tank starts empty.** `total_cost_usd` is therefore the cost of fuel for
+   the whole journey, not the cost of topping up a tank somebody else paid for.
+   Pass `"start_fuel_gallons": 50` for the "left the yard full" reading, in
+   which case a trip under 500 miles needs no fuel and costs nothing.
+2. **The first stop is the departure fill-up.** A vehicle with an empty tank
+   cannot reach a pump 30 miles away, so the planner nominates the cheapest
+   station near the origin, prices it as mile zero, and flags it with
+   `is_origin_fill`. The gallons still cover the entire route, so
+   `total_gallons_purchased` always equals `distance / 10`.
+3. **A station counts if it is within 15 miles of the route.** Configurable
+   through `max_detour_miles`. The detour distance itself is not added to the
+   trip.
+4. **Stops are at least 10 miles apart.** Without this the optimum will pull off
+   the road twice in one mile to save a fraction of a cent. Pass
+   `"min_stop_spacing_miles": 0` for the unconstrained optimum.
+5. **Prices are a snapshot.** The file has no dates, so every price is treated
+   as current.
+
+---
+
+## Testing
+
+```bash
+uv run pytest          # 102 tests
+uv run ruff check .
+```
+
+The suite never touches the network: the routing provider and the geocoder are
+both mocked, so it is deterministic and runs in under a second.
+
+It includes a randomised optimality check that compares the optimizer against an
+independent exhaustive search. See [docs/algorithm.md](docs/algorithm.md).
+
+---
+
+## Documentation
+
+* [docs/architecture.md](docs/architecture.md) — how a request flows through the
+  system, and why each piece is where it is.
+* [docs/algorithm.md](docs/algorithm.md) — the fuel stop optimizer, why it is
+  optimal, and how that claim is verified.
+
+---
+
+## Configuration
+
+Copy `.env.example` to `.env`. Every setting has a working default, so the API
+runs with no `.env` file at all. The file documents each value.
+
+The vehicle numbers the assessment fixes — 500 mile range, 10 miles per gallon —
+are settings rather than constants, so the same service can price a different
+vehicle without a code change.
