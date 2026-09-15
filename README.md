@@ -33,7 +33,7 @@ uv sync
 # 2. Create the database.
 uv run python manage.py migrate
 
-# 3. Load the fuel prices. Point this at the assessment CSV.
+# 3. Load the fuel prices.
 uv run python manage.py import_fuel_prices data/fuel-prices-for-be-assessment.csv
 
 # 4. Give every station a latitude and a longitude. No network calls.
@@ -61,7 +61,7 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 python manage.py migrate
-python manage.py import_fuel_prices data/sample-fuel-prices.csv
+python manage.py import_fuel_prices data/fuel-prices-for-be-assessment.csv
 python manage.py geocode_stations
 python manage.py runserver
 ```
@@ -70,13 +70,23 @@ Drop the `uv run` prefix from every command below if you install this way.
 
 ### The price file
 
-If you do not have the assessment CSV to hand, `data/sample-fuel-prices.csv`
-holds 8000 synthetic stations with the same columns. It is there so the project
-runs out of the box. Replace it with the real file.
+`data/fuel-prices-for-be-assessment.csv` is the file supplied with the
+assessment: 8151 rows, which collapse to 6967 distinct sites once the duplicate
+rack listings are merged to the cheapest price per site.
+
+`data/sample-fuel-prices.csv` is a synthetic stand-in with the same columns,
+kept so the project still runs if the real file is removed.
 
 The importer matches the header row by keyword rather than by exact spelling,
 so a renamed or reordered column still loads. It prints the mapping it chose
 before it writes anything.
+
+The file has no coordinates, and its address column is a highway descriptor --
+`I-44, EXIT 283 & US-69` -- not a street address. `geocode_stations` therefore
+places each site by city and state against the bundled Census gazetteer, which
+resolves **96.7 percent of the US sites with no network call**. The stragglers
+are unincorporated crossroads; add `--use-nominatim` to send only those to the
+public geocoder as a one-time job.
 
 ---
 
@@ -292,8 +302,11 @@ These are choices the brief left open. Each one is visible in the response.
   requirement holds, but the cache does not deduplicate under load. A shared
   Redis cache with a lock would fix both that and the same race in the geocoder.
 * **Stations are placed at their city centre**, because the price file has no
-  coordinates. That is accurate enough to choose stops against a 500 mile range,
-  but it is not accurate enough to navigate to the pump.
+  coordinates and no street addresses. That is accurate enough to choose stops
+  against a 500 mile range, but it is not accurate enough to navigate to the
+  pump.
+* **The file lists 112 Canadian sites.** Routes are within the USA, so those are
+  imported but never matched to a route.
 * **Prices have no date.** The file carries none, so every price is treated as
   current.
 

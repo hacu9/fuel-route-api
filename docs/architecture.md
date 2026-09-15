@@ -37,19 +37,41 @@ Everything below the routing call is local. That is the whole design.
 ### The offline gazetteer
 
 The price file names a city and a state but carries no coordinates, and a
-station that cannot be placed cannot be used. Geocoding 8000 addresses through a
-public geocoder would take over two hours and would breach its usage policy.
+station that cannot be placed cannot be used. Its address column is a highway
+descriptor -- `I-44, EXIT 283 & US-69` -- not a street address, so there is
+nothing to geocode below city level anyway. Sending 8000 rows through a public
+geocoder would take over two hours and would breach its usage policy.
 
 So the repository ships two derived extracts of the **US Census Bureau 2023
 Gazetteer**, which is public domain:
 
-* `data/us_places.csv.gz` — 32104 places, 457 KB
-* `data/us_zips.csv.gz` — 33791 ZIP areas, 369 KB
+* `data/us_places.csv.gz` -- 52350 keys, 715 KB
+* `data/us_zips.csv.gz` -- 33791 ZIP areas, 369 KB
 
-`geocode_stations` places the whole catalogue from these in seconds, with no
-network call. The same files resolve a caller's `"Dallas, TX"`, which is why an
-ordinary request reaches the routing provider having made no geocoding request
-at all.
+The place file is built in three tiers, and each may only fill a slot the tier
+above it left empty:
+
+1. **Census spellings** (32104). The official name with its one trailing
+   descriptor removed, so `Dallas city` becomes `dallas`.
+2. **Aliases** (977). The shorter names people actually type. `Boise City city`
+   is Boise to everyone who lives there, and `Athens-Clarke County unified
+   government` is Athens. Without these, Boise ID, Athens GA and Augusta GA were
+   all unplaceable.
+3. **Towns and townships** (19269). In New England a town is a Minor Civil
+   Division and never appears in the place file at all, which is why Berlin MA,
+   Auburn NH and Branford CT were missing. Townships elsewhere, such as
+   Bensalem PA, have the same problem.
+
+Tier order matters. Aliases and subdivisions can only fill gaps, never override,
+so `Oklahoma City` can never be swallowed by a different town called Oklahoma.
+
+Together these place **96.7 percent of the US stations in the assessment file**
+with no network call at all, in a few seconds. The stragglers are unincorporated
+crossroads; `geocode_stations --use-nominatim` sends only those to the public
+geocoder, one request per second, as a one-time job.
+
+The same files resolve a caller's `"Dallas, TX"`, which is why an ordinary
+request reaches the routing provider having made no geocoding request at all.
 
 `build_gazetteer` regenerates them. It imports `normalize_place` from the
 runtime module rather than reimplementing it, so the keys written at build time

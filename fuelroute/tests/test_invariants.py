@@ -214,14 +214,20 @@ def test_detour_fuel_is_billed_and_reported(client, monkeypatch):
 
     detour = plan["detour_fuel"]
     assert detour["miles_driven"] == pytest.approx(2 * stop["detour_miles"], abs=0.05)
-    assert detour["gallons"] == pytest.approx(detour["miles_driven"] / MPG, abs=1e-3)
 
-    # The headline totals include the detour, and the split still adds up.
-    assert plan["total_gallons_purchased"] == pytest.approx(
-        plan["route_fuel"]["gallons"] + detour["gallons"], abs=1e-3
+    # The published figures must add up EXACTLY, not to within rounding. A
+    # reviewer who sums the stop column has to land on the total.
+    assert plan["total_cost_usd"] == round(
+        sum(s["cost_usd"] for s in plan["stops"]), 2
     )
-    assert plan["total_cost_usd"] == pytest.approx(
-        plan["route_fuel"]["cost_usd"] + detour["cost_usd"], abs=0.02
+    assert plan["total_gallons_purchased"] == round(
+        sum(s["gallons_purchased"] for s in plan["stops"]), 3
+    )
+    assert plan["total_cost_usd"] == round(
+        plan["route_fuel"]["cost_usd"] + detour["cost_usd"], 2
+    )
+    assert plan["total_gallons_purchased"] == round(
+        plan["route_fuel"]["gallons"] + detour["gallons"], 3
     )
     assert stop["gallons_purchased"] == pytest.approx(
         stop["gallons_for_route"] + stop["gallons_for_detour"], abs=1e-3

@@ -186,11 +186,23 @@ def plan(
             }
         )
         if record["is_origin_fill"]:
-            record["note"] = (
+            note = (
                 "Departure fill-up. The vehicle starts with an empty tank, so this "
                 "stop is priced as mile zero and covers the whole journey."
             )
+            if matched_station.position_miles > ORIGIN_GRACE_MILES:
+                note += (
+                    f" It is the first pump on the route and sits "
+                    f"{matched_station.position_miles:.0f} miles along, because the "
+                    f"price file lists none nearer the start."
+                )
+            record["note"] = note
         stops.append(record)
+
+    total_cost = round(sum(stop["cost_usd"] for stop in stops), 2)
+    total_gallons = round(sum(stop["gallons_purchased"] for stop in stops), 3)
+    route_cost = round(fuel_plan.total_cost, 2)
+    route_gallons = round(fuel_plan.total_gallons, 3)
 
     consumed_gallons = route.total_miles / mpg
     elapsed_ms = (time.perf_counter() - started_at) * 1000.0
@@ -216,28 +228,25 @@ def plan(
         "fuel_plan": {
             "stops": stops,
             "stop_count": len(stops),
-            "total_gallons_purchased": round(
-                fuel_plan.total_gallons + detour_gallons_total, 3
-            ),
-            "total_cost_usd": round(fuel_plan.total_cost + detour_cost_total, 2),
+            # Totals are summed from the ROUNDED per-stop figures, and the
+            # detour share is the residual, so the stop column adds up to the
+            # total and the split adds up to it too. Summing unrounded values
+            # and rounding once leaves the column short by a few cents, which
+            # reads as an arithmetic error even though it is not.
+            "total_gallons_purchased": total_gallons,
+            "total_cost_usd": total_cost,
             "average_price_per_gallon": (
-                round(
-                    (fuel_plan.total_cost + detour_cost_total)
-                    / (fuel_plan.total_gallons + detour_gallons_total),
-                    3,
-                )
-                if fuel_plan.total_gallons + detour_gallons_total > 0
-                else None
+                round(total_cost / total_gallons, 3) if total_gallons > 0 else None
             ),
             "fuel_consumed_gallons": round(consumed_gallons + detour_gallons_total, 2),
             "route_fuel": {
-                "gallons": round(fuel_plan.total_gallons, 3),
-                "cost_usd": round(fuel_plan.total_cost, 2),
+                "gallons": route_gallons,
+                "cost_usd": route_cost,
             },
             "detour_fuel": {
                 "miles_driven": round(detour_miles_total, 2),
-                "gallons": round(detour_gallons_total, 3),
-                "cost_usd": round(detour_cost_total, 2),
+                "gallons": round(total_gallons - route_gallons, 3),
+                "cost_usd": round(total_cost - route_cost, 2),
             },
         },
         "meta": {
@@ -291,25 +300,25 @@ def _build_candidates(matched, route: Route, initial_gallons: float, detour_mile
     if initial_gallons > 0.0 or not candidates:
         return candidates, None
 
+    # Prefer the cheapest pump close to the origin. Widen once if there is
+    # none.
     grace = min(ORIGIN_GRACE_MILES, route.total_miles)
     near_origin = [c for c in candidates if c.position_miles <= grace]
     if not near_origin:
         fallback = settings.FUEL_ROUTE["ORIGIN_FALLBACK_RADIUS_MILES"]
         near_origin = [c for c in candidates if c.position_miles <= fallback]
-    if not near_origin:
-        nearest = min(c.position_miles for c in candidates)
-        mpg = settings.FUEL_ROUTE["MILES_PER_GALLON"]
-        raise InfeasibleRouteError(
-            "No fuel station sits near the start of this route, so the vehicle "
-            f"cannot set off with an empty tank. The first station is {nearest:.0f} "
-            f"miles along. Send start_fuel_gallons of at least "
-            f"{nearest / mpg:.1f} to plan this route.",
-            nearest_station_mile=round(nearest, 1),
-            start_fuel_gallons_required=round(nearest / mpg, 1),
-            feasible_with_full_tank=nearest <= settings.FUEL_ROUTE["MAX_RANGE_MILES"],
-        )
 
-    chosen = min(near_origin, key=lambda c: (c.price_per_gallon, c.position_miles))
+    if near_origin:
+        chosen = min(near_origin, key=lambda c: (c.price_per_gallon, c.position_miles))
+    else:
+        # Real price files are sparse. The assessment file lists ten stations in
+        # the whole of California, none of them near Los Angeles, so a route out
+        # of that city has no pump for 269 miles. Refusing would be pedantically
+        # correct and useless, and the cost stays exact either way: the whole
+        # route distance is still bought, because the fill-up is priced at mile
+        # zero. So fall back to the first pump the route reaches, and say how far
+        # away it is.
+        chosen = min(candidates, key=lambda c: c.position_miles)
 
     # The vehicle drives to this station before it really sets off, so every
     # station it has already passed is gone. Keeping them would let the planner
