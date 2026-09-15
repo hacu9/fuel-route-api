@@ -5,7 +5,7 @@ buy fuel along the way, and returns the total fuel bill.
 
 Built with Django 6.1 and Django REST Framework.
 
-![Dallas to Chicago, three fuel stops](docs/images/route-map.png)
+![Dallas to Chicago: 961 miles, six fuel stops, $289.43](docs/images/route-map.png)
 
 ---
 
@@ -127,49 +127,57 @@ The last three fields are optional. Their defaults come from `.env`.
 ```jsonc
 {
   "start":  { "query": "Dallas, TX", "latitude": 32.793333, "resolved_by": "gazetteer" },
-  "finish": { "query": "Chicago, IL", "latitude": 41.837551, "resolved_by": "gazetteer" },
+  "finish": { "query": "Chicago, IL", "latitude": 41.837045, "resolved_by": "gazetteer" },
   "route": {
     "distance_miles": 961.02,
     "duration_hours": 17.04,
     "geometry_polyline6": "...",
-    "bounds": [32.55, -97.07, 42.09, -87.35]
+    "bounds": [32.788344, -96.767691, 41.838447, -87.660792]
   },
   "vehicle": {
     "max_range_miles": 500.0,
     "miles_per_gallon": 10.0,
     "tank_capacity_gallons": 50.0,
     "start_fuel_gallons": 0.0,
-    "usable_range_miles": 470.0
-  },
+    "usable_range_miles": 470.0      // the range legs are planned against,
+  },                                 // once the worst-case detour is reserved
   "fuel_plan": {
     "stops": [
       {
-        "name": "Kwik Trip #4136",
-        "city": "Nevada", "state": "TX",
-        "latitude": 33.035329, "longitude": -96.370639,
-        "price_per_gallon": 2.731,
-        "route_mile_marker": 29.4,
-        "detour_miles": 5.03,
-        "gallons_purchased": 20.28,     // route fuel plus the detour
-        "gallons_for_route": 19.274,
-        "gallons_for_detour": 1.006,
-        "cost_usd": 55.39,
-        "is_origin_fill": true
+        "opis_id": "63669",
+        "name": "One9 #1248",
+        "address": "I-45, EXIT 271",
+        "city": "Wilmer", "state": "TX",
+        "latitude": 32.599015, "longitude": -96.681585,
+        "price_per_gallon": 2.756,
+        "route_mile_marker": 4.3,
+        "detour_miles": 13.5,
+        "gallons_purchased": 49.7,   // route fuel plus the drive to the pump
+        "gallons_for_route": 47.0,
+        "gallons_for_detour": 2.7,
+        "cost_usd": 136.97,
+        "tank_gallons_on_arrival": 0.0,
+        "tank_gallons_on_departure": 47.0,
+        "is_origin_fill": true,
+        "note": "Departure fill-up. The vehicle starts with an empty tank, so
+                 this stop is priced as mile zero and covers the whole journey."
       }
+      // ... five more
     ],
-    "stop_count": 3,
-    "total_gallons_purchased": 98.0,
-    "total_cost_usd": 251.41,
-    "average_price_per_gallon": 2.565,
-    "fuel_consumed_gallons": 98.0,
-    "route_fuel":  { "gallons": 96.102, "cost_usd": 246.43 },
-    "detour_fuel": { "miles_driven": 19.1, "gallons": 1.91, "cost_usd": 4.98 }
+    "stop_count": 6,
+    "total_gallons_purchased": 102.411,
+    "total_cost_usd": 289.43,
+    "average_price_per_gallon": 2.826,
+    "fuel_consumed_gallons": 102.41,
+    "route_fuel":  { "gallons": 96.102, "cost_usd": 271.42 },
+    "detour_fuel": { "miles_driven": 63.09, "gallons": 6.309, "cost_usd": 18.01 }
   },
   "meta": {
     "external_api_calls": { "routing": 1, "geocoding": 0, "total": 1 },
-    "stations_near_route": 318,
-    "stations_considered": 55,
-    "timing_ms": { "routing_provider": 711.1, "local_computation": 6.7, "total": 717.8 }
+    "stations_in_catalog": 6844,
+    "stations_near_route": 244,
+    "stations_considered": 47,
+    "timing_ms": { "routing_provider": 902.6, "local_computation": 4.1, "total": 906.7 }
   }
 }
 ```
