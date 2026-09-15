@@ -4,6 +4,26 @@ Five minutes is the cap, and it is tight. The plan below runs to about 4:40 and
 covers both halves of what the brief asks for: the API working in Postman, and a
 quick tour of the code.
 
+## Verified routes
+
+Run against the real price file. Use one of these on camera. The figures are
+what the API returns today, so you can say them out loud before they appear.
+
+| Route | Miles | Stops | Total |
+|---|---:|---:|---:|
+| Dallas, TX to Chicago, IL | 961 | 6 | $289.43 |
+| Los Angeles, CA to New York, NY | 2811 | 17 | $899.12 |
+| Seattle, WA to Miami, FL | 3303 | 20 | $1,050.80 |
+| New York, NY to Chicago, IL | 796 | 4 | $255.36 |
+| Denver, CO to Chicago, IL | 1003 | 9 | $304.36 |
+
+**Two routes refuse, and both are correct.** Phoenix to Portland and Los Angeles
+to Seattle return `422 infeasible_route`, because the price file has no station
+at all across Nevada and eastern Oregon -- a 1008 mile gap against a 500 mile
+range. The refusal is the right answer, but do not discover it live. If you want
+to show a refusal, use Honolulu to Los Angeles instead: `no_route` is instantly
+understandable and needs no explanation about data coverage.
+
 ## Before you hit record
 
 ```bash
@@ -12,6 +32,11 @@ cd ~/code/backend-djano
 # 1. Load the real price file.
 uv run python manage.py import_fuel_prices data/fuel-prices-for-be-assessment.csv --replace
 uv run python manage.py geocode_stations
+
+# Optional, about four minutes, and it needs the network. It lifts US coverage
+# from 96.7 to 99.6 percent by sending the few hundred unlisted crossroads to
+# the public geocoder. The route figures above already assume you ran it.
+uv run python manage.py geocode_stations --use-nominatim
 
 # 2. Start the server.
 uv run python manage.py runserver
@@ -44,7 +69,8 @@ the JSON is readable.
 
 > "This is a Django 6.1 API. You give it a start and a finish in the US, and it
 > returns the route, the cheapest places to buy fuel for a 500 mile range at
-> 10 miles per gallon, and the total fuel bill."
+> 10 miles per gallon, and the total fuel bill. It's running on the price file
+> you sent - about seven thousand truck stops."
 
 Do not read out the brief. They wrote it.
 
@@ -52,7 +78,7 @@ Do not read out the brief. They wrote it.
 
 Run **2. Dallas to Chicago**. While it returns, say what to look at:
 
-> "961 miles, three stops, and there's the total."
+> "961 miles, six stops, and there's the total."
 
 Then scroll to `meta` and stop there. This is the part they are checking.
 
@@ -78,7 +104,7 @@ Hover one marker so the popup opens. Keep this short - it is the easy part.
 
 Run **4. Los Angeles to New York**.
 
-> "Coast to coast, 2811 miles, fifteen stops, still one external call."
+> "Coast to coast, 2811 miles, seventeen stops, still one external call."
 
 Run **8. Outside the USA** or **9. No drivable route**.
 
@@ -106,10 +132,12 @@ Switch to the editor. Show **three files only**. Resist opening more.
 
 **`fuelroute/services/gazetteer.py`** - just the docstring.
 
-> "The one-call number comes from here. The price file has no coordinates, so
-> rather than geocode 8000 addresses through a public API, the repo ships a US
-> Census gazetteer. City and state, ZIP and coordinates all resolve offline, so a
-> normal request never calls a geocoder at all."
+> "The one-call number comes from here. The price file has no coordinates, and
+> its address column is a highway exit, not a street address. So rather than push
+> seven thousand rows through a public geocoder, the repo ships a US Census
+> gazetteer and places 96.7 percent of them offline. The same file resolves the
+> caller's 'Dallas, TX', which is why a normal request never calls a geocoder at
+> all."
 
 ### 4:00 - 4:40  Close
 
